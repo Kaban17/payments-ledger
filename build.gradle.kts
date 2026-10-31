@@ -81,9 +81,18 @@ tasks.named("jooqCodegen") {
     outputs.dir("build/generated-sources/jooq")
 }
 
-application { mainClass = "com.paymentsledger.Main" }
+// On macOS the JDK imports the system SOCKS proxy (e.g. from a VPN app), whose bypass list usually
+// lacks localhost. pgjdbc then refuses to resolve "localhost" itself and the connection fails, so
+// always bypass the proxy for local addresses.
+val localNoProxy = "socksNonProxyHosts=localhost|127.*|[::1]|local|*.local|169.254/16"
+
+application {
+    mainClass = "com.paymentsledger.Main"
+    applicationDefaultJvmArgs = listOf("-D$localNoProxy")
+}
 
 tasks.test {
+    jvmArgs("-D$localNoProxy")
     useJUnitPlatform()
     testLogging {
         events("passed", "skipped", "failed")
