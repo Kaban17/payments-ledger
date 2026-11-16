@@ -6,6 +6,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.paymentsledger.accounts.AccountRepository;
 import com.paymentsledger.accounts.AccountRoutes;
 import com.paymentsledger.api.ErrorHandling;
+import com.paymentsledger.transfers.DepositService;
+import com.paymentsledger.transfers.TransferRoutes;
+import com.paymentsledger.transfers.TransferService;
 import com.zaxxer.hikari.HikariDataSource;
 import io.javalin.Javalin;
 import io.javalin.http.HttpStatus;
@@ -40,11 +43,15 @@ public final class App {
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
+        TransferService transferService = new TransferService(dsl);
+        DepositService depositService = new DepositService(dsl, transferService);
+
         Javalin javalin = Javalin.create(cfg -> {
             cfg.startup.showJavalinBanner = false;
             cfg.jsonMapper(new JavalinJackson(mapper, false));
             ErrorHandling.register(cfg);
             new AccountRoutes(new AccountRepository(dsl)).register(cfg);
+            new TransferRoutes(transferService, depositService).register(cfg);
 
             cfg.routes.get("/health", ctx -> {
                 boolean dbUp = check(() -> dsl.selectOne().fetch());
