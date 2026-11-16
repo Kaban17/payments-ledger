@@ -100,22 +100,33 @@ class ConcurrencySpec extends IntegrationSpec {
         accounts.each { service.transfer(cmd(SYSTEM, it, 10_000)) }
 
         // 1000 opposite-direction pairs (2000 transfers, 40%) queued back to back, plus 3000 random ones.
-        def commands = []
-        1000.times {
+        // Each pair shares a barrier so both halves enter transfer() together on different threads.
+        // Pairs are adjacent in the FIFO queue, so at most one half waits for its partner at a time.
+        def tasks = []
+        def pairThreads = new java.util.concurrent.ConcurrentHashMap<Integer, List<String>>()
+        1000.times { int pair ->
             def a = accounts[random.nextInt(10)]
             def b = (accounts - a)[random.nextInt(9)]
-            commands << cmd(a, b, 1 + random.nextInt(500))
-            commands << cmd(b, a, 1 + random.nextInt(500))
+            def barrier = new java.util.concurrent.CyclicBarrier(2)
+            pairThreads[pair] = java.util.Collections.synchronizedList([])
+            [cmd(a, b, 1 + random.nextInt(500)), cmd(b, a, 1 + random.nextInt(500))].each { c ->
+                tasks << ({ ->
+                    barrier.await(10, TimeUnit.SECONDS)
+                    pairThreads[pair] << Thread.currentThread().name
+                    service.transfer(c)
+                } as Callable)
+            }
         }
         3000.times {
             def a = accounts[random.nextInt(10)]
             def b = (accounts - a)[random.nextInt(9)]
-            commands << cmd(a, b, 1 + random.nextInt(500))
+            def c = cmd(a, b, 1 + random.nextInt(500))
+            tasks << ({ -> service.transfer(c) } as Callable)
         }
-        assert commands.size() == 5000
+        assert tasks.size() == 5000
 
         when:
-        def outcomes = runGated(16, commands.collect { c -> { -> service.transfer(c) } as Callable })
+        def outcomes = runGated(16, tasks)
         def failures = outcomes.findAll { it.error != null }.collect { it.error }
         def unexpected = failures.findAll { !isInsufficientFunds(it) }
         def deadlocks = failures.findAll { isDeadlock(it) }
@@ -124,8 +135,11 @@ class ConcurrencySpec extends IntegrationSpec {
                 "unexpected=${unexpected.collect { it.class.name + ': ' + it.message }.unique().take(10)}"
 
         then:
-        deadlocks.isEmpty()
+        assert deadlocks.isEmpty(): "deadlocks=${deadlocks.size()}, ${message}"
         assert unexpected.isEmpty(): message
+        assert pairThreads.size() == 1000 && pairThreads.values().every { it.size() == 2 && it[0] != it[1] }:
+                "opposite pairs must run on different threads; ${message}"
+
         assert succeeded > 0 && failures.size() > 0: "stress should mix successes and insufficient_funds; ${message}"
 
         and: "money is conserved and no customer is overdrawn"
