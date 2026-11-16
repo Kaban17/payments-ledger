@@ -27,4 +27,17 @@ public class ApiException extends RuntimeException {
     public static ApiException notFound(String what) {
         return new ApiException(404, "not_found", what + " not found");
     }
+
+    public static ApiException idempotencyKeyReused() {
+        return new ApiException(
+                409, "idempotency_key_reused", "Idempotency-Key was already used with a different request");
+    }
+
+    public static ApiException insufficientFunds() {
+        return new ApiException(422, "insufficient_funds", "Insufficient funds");
+    }
+
+    public static ApiException currencyMismatch() {
+        return new ApiException(422, "currency_mismatch", "Currency does not match the accounts' currency");
+    }
 }
