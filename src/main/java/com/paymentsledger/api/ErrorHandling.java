@@ -21,11 +21,16 @@ public final class ErrorHandling {
                 JsonProcessingException.class,
                 (e, ctx) -> respond(ctx, 400, "validation_failed", "Request body is not valid JSON"));
         cfg.routes.exception(HttpResponseException.class, (e, ctx) -> {
-            if (e.getStatus() == 400) {
+            int status = e.getStatus();
+            if (status == 400) {
                 respond(ctx, 400, "validation_failed", "Malformed request");
+            } else if (status >= 500) {
+                log.error("Unexpected HTTP error {}", status, e);
+                respond(ctx, status, "internal_error", "Internal server error");
             } else {
-                log.error("Unexpected HTTP error {}", e.getStatus(), e);
-                respond(ctx, 500, "internal_error", "Internal server error");
+                log.debug("Client error {} on {} {}", status, ctx.method(), ctx.path());
+                String code = status == 404 ? "not_found" : status == 405 ? "method_not_allowed" : "http_error";
+                respond(ctx, status, code, e.getMessage());
             }
         });
         cfg.routes.exception(Exception.class, (e, ctx) -> {

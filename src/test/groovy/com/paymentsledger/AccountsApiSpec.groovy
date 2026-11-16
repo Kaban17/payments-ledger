@@ -76,4 +76,28 @@ class AccountsApiSpec extends IntegrationSpec {
         r.status == 400
         r.body.error == "validation_failed"
     }
+
+    def "unknown route returns 404 not_found"() {
+        when:
+        def r = get("/unknown-route")
+
+        then:
+        r.status == 404
+        r.body.keySet() == ["error", "message"] as Set
+        r.body.error == "not_found"
+    }
+
+    def "wrong method on an existing path returns Javalin's 404 (no 405 detection)"() {
+        when:
+        def response = http.send(
+                java.net.http.HttpRequest.newBuilder(URI.create("http://localhost:${app.port()}/accounts"))
+                        .PUT(java.net.http.HttpRequest.BodyPublishers.noBody()).build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString())
+        def body = new groovy.json.JsonSlurper().parseText(response.body())
+
+        then:
+        response.statusCode() == 404
+        body.keySet() == ["error", "message"] as Set
+        body.error == "not_found"
+    }
 }
