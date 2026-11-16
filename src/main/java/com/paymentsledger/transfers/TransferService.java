@@ -40,8 +40,7 @@ public final class TransferService {
         }
 
         try {
-            Transfer created = dsl.transactionResult(tx -> execute(tx.dsl(), cmd));
-            return new TransferResult(created, false);
+            return dsl.transactionResult(tx -> execute(tx.dsl(), cmd));
         } catch (DataAccessException e) {
             if (isIdempotencyViolation(e)) {
                 StoredTransfer winner = findByKey(cmd.idempotencyKey()).orElseThrow(() -> e);
@@ -69,7 +68,7 @@ public final class TransferService {
         }
     }
 
-    private Transfer execute(DSLContext tx, TransferCommand cmd) {
+    private TransferResult execute(DSLContext tx, TransferCommand cmd) {
         List<Record4<UUID, String, Long, Boolean>> locked = tx
                 .select(ACCOUNTS.ID, ACCOUNTS.CURRENCY, ACCOUNTS.BALANCE, ACCOUNTS.IS_SYSTEM)
                 .from(ACCOUNTS)
@@ -77,6 +76,14 @@ public final class TransferService {
                 .orderBy(ACCOUNTS.ID)
                 .forUpdate()
                 .fetch();
+
+        // A same-key request may have committed while we waited for the locks; it must be replayed
+        // (or rejected as a key reuse) before any balance check sees its effects.
+        Optional<StoredTransfer> winner = findByKey(tx, cmd.idempotencyKey());
+        if (winner.isPresent()) {
+            return replay(winner.get(), cmd);
+        }
+
         if (locked.size() < 2) {
             throw ApiException.notFound("account");
         }
@@ -120,7 +127,7 @@ public final class TransferService {
                 .where(ACCOUNTS.ID.eq(cmd.toAccountId()))
                 .execute();
 
-        return transfer;
+        return new TransferResult(transfer, false);
     }
 
     private TransferResult replay(StoredTransfer stored, TransferCommand cmd) {
@@ -131,6 +138,10 @@ public final class TransferService {
     }
 
     private Optional<StoredTransfer> findByKey(String key) {
+        return findByKey(dsl, key);
+    }
+
+    private static Optional<StoredTransfer> findByKey(DSLContext dsl, String key) {
         return dsl.selectFrom(TRANSFERS)
                 .where(TRANSFERS.IDEMPOTENCY_KEY.eq(key))
                 .fetchOptional(r -> new StoredTransfer(toTransfer(r), r.getRequestHash()));
