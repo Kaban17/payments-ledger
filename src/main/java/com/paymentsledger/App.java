@@ -38,23 +38,23 @@ public final class App {
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
         Javalin javalin = Javalin.create(cfg -> {
-            cfg.showJavalinBanner = false;
+            cfg.startup.showJavalinBanner = false;
             cfg.jsonMapper(new JavalinJackson(mapper, false));
-        });
 
-        javalin.get("/health", ctx -> {
-            boolean dbUp = check(() -> dsl.selectOne().fetch());
-            boolean redisUp = check(() -> {
-                try (Jedis jedis = redis.getResource()) {
-                    jedis.ping();
-                }
+            cfg.routes.get("/health", ctx -> {
+                boolean dbUp = check(() -> dsl.selectOne().fetch());
+                boolean redisUp = check(() -> {
+                    try (Jedis jedis = redis.getResource()) {
+                        jedis.ping();
+                    }
+                });
+                boolean up = dbUp && redisUp;
+                ctx.status(up ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE)
+                        .json(Map.of(
+                                "status", up ? "ok" : "degraded",
+                                "postgres", dbUp ? "up" : "down",
+                                "redis", redisUp ? "up" : "down"));
             });
-            boolean up = dbUp && redisUp;
-            ctx.status(up ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE)
-                    .json(Map.of(
-                            "status", up ? "ok" : "degraded",
-                            "postgres", dbUp ? "up" : "down",
-                            "redis", redisUp ? "up" : "down"));
         });
 
         return new App(javalin, dataSource, redis, dsl);
