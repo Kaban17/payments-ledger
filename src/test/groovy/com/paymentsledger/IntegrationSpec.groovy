@@ -77,6 +77,13 @@ abstract class IntegrationSpec extends Specification {
         send(builder)
     }
 
+    /** POSTs the string as-is (for malformed-body tests). */
+    protected Map postRaw(String path, String rawBody) {
+        send(HttpRequest.newBuilder(uri(path))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(rawBody)))
+    }
+
     private URI uri(String path) {
         URI.create("http://localhost:${app.port()}${path}")
     }

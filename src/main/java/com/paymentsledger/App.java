@@ -3,6 +3,9 @@ package com.paymentsledger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.paymentsledger.accounts.AccountRepository;
+import com.paymentsledger.accounts.AccountRoutes;
+import com.paymentsledger.api.ErrorHandling;
 import com.zaxxer.hikari.HikariDataSource;
 import io.javalin.Javalin;
 import io.javalin.http.HttpStatus;
@@ -40,6 +43,8 @@ public final class App {
         Javalin javalin = Javalin.create(cfg -> {
             cfg.startup.showJavalinBanner = false;
             cfg.jsonMapper(new JavalinJackson(mapper, false));
+            ErrorHandling.register(cfg);
+            new AccountRoutes(new AccountRepository(dsl)).register(cfg);
 
             cfg.routes.get("/health", ctx -> {
                 boolean dbUp = check(() -> dsl.selectOne().fetch());
