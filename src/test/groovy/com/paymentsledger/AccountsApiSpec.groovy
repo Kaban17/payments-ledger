@@ -87,7 +87,7 @@ class AccountsApiSpec extends IntegrationSpec {
         r.body.error == "not_found"
     }
 
-    def "wrong method on an existing path returns Javalin's 404 (no 405 detection)"() {
+    def "wrong method on an existing path returns 405 method_not_allowed"() {
         when:
         def response = http.send(
                 java.net.http.HttpRequest.newBuilder(URI.create("http://localhost:${app.port()}/accounts"))
@@ -96,8 +96,8 @@ class AccountsApiSpec extends IntegrationSpec {
         def body = new groovy.json.JsonSlurper().parseText(response.body())
 
         then:
-        response.statusCode() == 404
+        response.statusCode() == 405
         body.keySet() == ["error", "message"] as Set
-        body.error == "not_found"
+        body.error == "method_not_allowed"
     }
 }

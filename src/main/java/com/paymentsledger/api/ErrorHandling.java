@@ -16,6 +16,7 @@ public final class ErrorHandling {
     private ErrorHandling() {}
 
     public static void register(JavalinConfig cfg) {
+        cfg.http.prefer405over404 = true;
         cfg.routes.exception(ApiException.class, (e, ctx) -> respond(ctx, e.status(), e.code(), e.getMessage()));
         cfg.routes.exception(
                 JsonProcessingException.class,
