@@ -5,6 +5,8 @@ import groovy.json.JsonSlurper
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import org.jooq.exception.DataAccessException
+import org.postgresql.util.PSQLException
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.postgresql.PostgreSQLContainer
 import spock.lang.Shared
@@ -44,6 +46,25 @@ abstract class IntegrationSpec extends Specification {
         app.dsl().execute("TRUNCATE ledger_entries, transfers, accounts CASCADE")
     }
 
+    protected int exec(String sql, Object... bindings) {
+        app.dsl().execute(sql, bindings)
+    }
+
+    /**
+     * Runs the action and returns the Postgres error that rejected it as
+     * [state: SQLSTATE, constraint: constraint or index name], or null if it succeeded.
+     */
+    protected Map violation(Closure action) {
+        try {
+            action()
+            return null
+        } catch (DataAccessException e) {
+            PSQLException pg = e.getCause(PSQLException)
+            if (pg == null) throw e
+            return [state: pg.SQLState, constraint: pg.serverErrorMessage?.constraint]
+        }
+    }
+
     protected Map get(String path) {
         send(HttpRequest.newBuilder(uri(path)).GET())
     }
@@ -52,6 +73,15 @@ abstract class IntegrationSpec extends Specification {
         def builder = HttpRequest.newBuilder(uri(path))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(JsonOutput.toJson(body)))
+        headers.each { k, v -> builder.header(k, v) }
+        send(builder)
+    }
+
+    /** POSTs the string as-is (for malformed-body tests). */
+    protected Map postRaw(String path, String rawBody, Map<String, String> headers = [:]) {
+        def builder = HttpRequest.newBuilder(uri(path))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(rawBody))
         headers.each { k, v -> builder.header(k, v) }
         send(builder)
     }

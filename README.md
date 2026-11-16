@@ -15,13 +15,13 @@ The core goals are:
 | Concern | Choice |
 |---|---|
 | Language | Java 21 |
-| HTTP | Javalin 6 + Jackson |
+| HTTP | Javalin 7 + Jackson |
 | SQL | jOOQ (classes generated from the Flyway migrations) |
 | Migrations | Flyway |
 | Database | PostgreSQL 16 |
 | Cache / idempotency | Redis 7 (Jedis) |
 | Connection pool | HikariCP |
-| Tests | Spock 2.3 (Groovy 4) + Testcontainers |
+| Tests | Spock 2.5 (Groovy 5) + Testcontainers |
 | Build | Gradle (Kotlin DSL) |
 
 ## Getting started
@@ -73,7 +73,7 @@ All settings come from environment variables:
 All amounts are stored as `BIGINT` in **minor units** (e.g. cents). Floating point is never used.
 
 ```
-accounts        id, currency, balance, created_at
+accounts        id, currency, balance (≥ 0 unless is_system), is_system, created_at
 transfers       id, idempotency_key (UNIQUE), request_hash,
                 from_account_id, to_account_id, amount (> 0), currency, created_at
 ledger_entries  id, transfer_id, account_id, amount (signed, ≠ 0), created_at
@@ -81,7 +81,8 @@ ledger_entries  id, transfer_id, account_id, amount (signed, ≠ 0), created_at
 
 - `ledger_entries` is **append-only**. A transfer of 100 from A to B writes `A: -100` and `B: +100`.
 - `accounts.balance` is a cached copy of `SUM(ledger_entries.amount)` for that account, updated in the same transaction as the entries. Tests check that the two always agree.
-- Money enters the system through an **EXTERNAL** system account, so deposits are double-entry too.
+- Money enters the system through an **EXTERNAL** system account (`is_system = true`, at most one per currency, created on first use), so deposits are double-entry too. System accounts are the only ones allowed a negative balance.
+- The database enforces these rules itself (check, unique and foreign-key constraints), as a safety net under the service code. `SchemaConstraintsSpec` covers each one.
 
 ## How a transfer works
 
@@ -117,7 +118,7 @@ Planned correctness tests:
 - [x] Project skeleton: Gradle, Javalin, Flyway, jOOQ code generation, docker-compose
 - [x] Spock + Testcontainers base spec, `/health`
 - [x] Initial schema (`accounts`, `transfers`, `ledger_entries`)
-- [ ] Schema constraint specs and the EXTERNAL system account
+- [x] Schema constraint specs and system (EXTERNAL) accounts
 - [ ] Accounts API: `POST /accounts`, `GET /accounts/{id}`
 - [ ] `TransferService` with ordered row locking
 - [ ] Conservation stress test and overdraft race

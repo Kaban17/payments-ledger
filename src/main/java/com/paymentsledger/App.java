@@ -3,6 +3,12 @@ package com.paymentsledger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.paymentsledger.accounts.AccountRepository;
+import com.paymentsledger.accounts.AccountRoutes;
+import com.paymentsledger.api.ErrorHandling;
+import com.paymentsledger.transfers.DepositService;
+import com.paymentsledger.transfers.TransferRoutes;
+import com.paymentsledger.transfers.TransferService;
 import com.zaxxer.hikari.HikariDataSource;
 import io.javalin.Javalin;
 import io.javalin.http.HttpStatus;
@@ -37,24 +43,30 @@ public final class App {
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-        Javalin javalin = Javalin.create(cfg -> {
-            cfg.showJavalinBanner = false;
-            cfg.jsonMapper(new JavalinJackson(mapper, false));
-        });
+        TransferService transferService = new TransferService(dsl);
+        DepositService depositService = new DepositService(dsl, transferService);
 
-        javalin.get("/health", ctx -> {
-            boolean dbUp = check(() -> dsl.selectOne().fetch());
-            boolean redisUp = check(() -> {
-                try (Jedis jedis = redis.getResource()) {
-                    jedis.ping();
-                }
+        Javalin javalin = Javalin.create(cfg -> {
+            cfg.startup.showJavalinBanner = false;
+            cfg.jsonMapper(new JavalinJackson(mapper, false));
+            ErrorHandling.register(cfg);
+            new AccountRoutes(new AccountRepository(dsl)).register(cfg);
+            new TransferRoutes(transferService, depositService).register(cfg);
+
+            cfg.routes.get("/health", ctx -> {
+                boolean dbUp = check(() -> dsl.selectOne().fetch());
+                boolean redisUp = check(() -> {
+                    try (Jedis jedis = redis.getResource()) {
+                        jedis.ping();
+                    }
+                });
+                boolean up = dbUp && redisUp;
+                ctx.status(up ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE)
+                        .json(Map.of(
+                                "status", up ? "ok" : "degraded",
+                                "postgres", dbUp ? "up" : "down",
+                                "redis", redisUp ? "up" : "down"));
             });
-            boolean up = dbUp && redisUp;
-            ctx.status(up ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE)
-                    .json(Map.of(
-                            "status", up ? "ok" : "degraded",
-                            "postgres", dbUp ? "up" : "down",
-                            "redis", redisUp ? "up" : "down"));
         });
 
         return new App(javalin, dataSource, redis, dsl);
