@@ -1,10 +1,15 @@
 package com.paymentsledger.transfers;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymentsledger.api.ApiException;
+import com.paymentsledger.idempotency.CachedResponse;
+import com.paymentsledger.idempotency.IdempotencyCache;
 import io.javalin.config.JavalinConfig;
 import io.javalin.http.Context;
 import io.javalin.http.HttpStatus;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -16,10 +21,15 @@ public final class TransferRoutes {
 
     private final TransferService transfers;
     private final DepositService deposits;
+    private final IdempotencyCache cache;
+    private final ObjectMapper mapper;
 
-    public TransferRoutes(TransferService transfers, DepositService deposits) {
+    public TransferRoutes(
+            TransferService transfers, DepositService deposits, IdempotencyCache cache, ObjectMapper mapper) {
         this.transfers = transfers;
         this.deposits = deposits;
+        this.cache = cache;
+        this.mapper = mapper;
     }
 
     public void register(JavalinConfig cfg) {
@@ -35,8 +45,11 @@ public final class TransferRoutes {
         UUID to = uuid(body, "toAccountId");
         long amount = amount(body);
         String currency = currency(body);
-        respond(ctx, transfers.transfer(new TransferCommand(
-                key, RequestHash.transfer(from, to, amount, currency), from, to, amount, currency)));
+        String hash = RequestHash.transfer(from, to, amount, currency);
+        if (serveFromCache(ctx, key, hash)) {
+            return;
+        }
+        respond(ctx, key, hash, transfers.transfer(new TransferCommand(key, hash, from, to, amount, currency)));
     }
 
     private void deposit(Context ctx) {
@@ -48,7 +61,11 @@ public final class TransferRoutes {
         if (amount <= 0) {
             throw ApiException.validation("amount must be greater than 0");
         }
-        respond(ctx, deposits.deposit(key, accountId, amount, currency));
+        String hash = RequestHash.deposit(accountId, amount, currency);
+        if (serveFromCache(ctx, key, hash)) {
+            return;
+        }
+        respond(ctx, key, hash, deposits.deposit(key, accountId, amount, currency));
     }
 
     private void get(Context ctx) {
@@ -61,8 +78,30 @@ public final class TransferRoutes {
         ctx.json(transfers.findById(id).orElseThrow(() -> ApiException.notFound("transfer")));
     }
 
-    private static void respond(Context ctx, TransferResult result) {
-        ctx.status(result.replayed() ? HttpStatus.OK : HttpStatus.CREATED).json(result.transfer());
+    /** Returns true if the response was written from the cache; throws 409 if the key belongs to another request. */
+    private boolean serveFromCache(Context ctx, String key, String hash) {
+        Optional<CachedResponse> hit = cache.get(key);
+        if (hit.isEmpty()) {
+            return false;
+        }
+        if (!hit.get().requestHash().equals(hash)) {
+            throw ApiException.idempotencyKeyReused();
+        }
+        ctx.status(HttpStatus.OK).contentType("application/json").result(hit.get().body());
+        return true;
+    }
+
+    private void respond(Context ctx, String key, String hash, TransferResult result) {
+        String json;
+        try {
+            json = mapper.writeValueAsString(result.transfer());
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+        cache.put(key, hash, json);
+        ctx.status(result.replayed() ? HttpStatus.OK : HttpStatus.CREATED)
+                .contentType("application/json")
+                .result(json);
     }
 
     private static String idempotencyKey(Context ctx) {

@@ -9,6 +9,7 @@ import org.jooq.exception.DataAccessException
 import org.postgresql.util.PSQLException
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.postgresql.PostgreSQLContainer
+import redis.clients.jedis.JedisPool
 import spock.lang.Shared
 import spock.lang.Specification
 
@@ -21,9 +22,12 @@ abstract class IntegrationSpec extends Specification {
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
     static final GenericContainer REDIS = new GenericContainer("redis:7-alpine").withExposedPorts(6379)
 
+    static final JedisPool REDIS_POOL
+
     static {
         POSTGRES.start()
         REDIS.start()
+        REDIS_POOL = new JedisPool(REDIS.host, REDIS.getMappedPort(6379))
     }
 
     @Shared App app
@@ -44,6 +48,12 @@ abstract class IntegrationSpec extends Specification {
 
     def setup() {
         app.dsl().execute("TRUNCATE ledger_entries, transfers, accounts CASCADE")
+        redis { it.flushAll() }
+    }
+
+    /** Runs the closure with a Jedis connection to the shared test Redis. */
+    protected <T> T redis(Closure<T> action) {
+        REDIS_POOL.resource.withCloseable { action(it) }
     }
 
     protected int exec(String sql, Object... bindings) {

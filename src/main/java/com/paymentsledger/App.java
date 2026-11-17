@@ -6,6 +6,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.paymentsledger.accounts.AccountRepository;
 import com.paymentsledger.accounts.AccountRoutes;
 import com.paymentsledger.api.ErrorHandling;
+import com.paymentsledger.idempotency.IdempotencyCache;
 import com.paymentsledger.transfers.DepositService;
 import com.paymentsledger.transfers.TransferRoutes;
 import com.paymentsledger.transfers.TransferService;
@@ -13,10 +14,12 @@ import com.zaxxer.hikari.HikariDataSource;
 import io.javalin.Javalin;
 import io.javalin.http.HttpStatus;
 import io.javalin.json.JavalinJackson;
+import java.net.URI;
 import java.util.Map;
 import org.jooq.DSLContext;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisPoolConfig;
 
 /** Wires infrastructure and routes. Tests build one with {@link #create(Config)} and start it on port 0. */
 public final class App {
@@ -37,7 +40,7 @@ public final class App {
         HikariDataSource dataSource = Database.dataSource(config);
         Database.migrate(dataSource);
         DSLContext dsl = Database.dsl(dataSource);
-        JedisPool redis = new JedisPool(config.redisUrl());
+        JedisPool redis = new JedisPool(new JedisPoolConfig(), URI.create(config.redisUrl()), 500, 500);
 
         ObjectMapper mapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
@@ -51,7 +54,7 @@ public final class App {
             cfg.jsonMapper(new JavalinJackson(mapper, false));
             ErrorHandling.register(cfg);
             new AccountRoutes(new AccountRepository(dsl)).register(cfg);
-            new TransferRoutes(transferService, depositService).register(cfg);
+            new TransferRoutes(transferService, depositService, new IdempotencyCache(redis, mapper), mapper).register(cfg);
 
             cfg.routes.get("/health", ctx -> {
                 boolean dbUp = check(() -> dsl.selectOne().fetch());
