@@ -24,7 +24,7 @@ class EntriesApiSpec extends IntegrationSpec {
 
     def "pages of 2, 2, 1 with strictly descending ids and null final cursor"() {
         given:
-        def (a, b) = seeded()
+        def a = seeded()[0]
 
         when:
         def p1 = get("/accounts/$a/entries?limit=2")
@@ -45,7 +45,7 @@ class EntriesApiSpec extends IntegrationSpec {
 
     def "entries have signed amounts and the documented shape"() {
         given:
-        def (a, b) = seeded()
+        def a = seeded()[0]
 
         when:
         def r = get("/accounts/$a/entries")
@@ -60,9 +60,27 @@ class EntriesApiSpec extends IntegrationSpec {
         r.body.nextCursor == null
     }
 
+    def "default limit is 50"() {
+        given:
+        def a = newAccount()
+        def b = newAccount()
+        assert post("/deposits", [accountId: a, amount: 1000, currency: "EUR"], key("d")).status == 201
+        (1..54).each {
+            assert post("/transfers", [fromAccountId: a, toAccountId: b, amount: 1, currency: "EUR"], key("t$it")).status == 201
+        }
+
+        when:
+        def r = get("/accounts/$a/entries")
+
+        then:
+        r.status == 200
+        r.body.entries.size() == 50
+        r.body.nextCursor == r.body.entries.last().id.toString()
+    }
+
     def "limit exactly exhausting the entries returns a null cursor"() {
         given:
-        def (a, b) = seeded()
+        def a = seeded()[0]
 
         expect:
         get("/accounts/$a/entries?limit=5").body.nextCursor == null
