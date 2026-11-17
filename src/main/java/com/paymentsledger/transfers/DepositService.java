@@ -3,8 +3,10 @@ package com.paymentsledger.transfers;
 import static com.paymentsledger.jooq.Tables.ACCOUNTS;
 
 import com.paymentsledger.api.ApiException;
+import java.util.Optional;
 import java.util.UUID;
 import org.jooq.DSLContext;
+import org.jooq.Record2;
 
 /** Deposits move money from the per-currency EXTERNAL system account into a customer account. */
 public final class DepositService {
@@ -18,19 +20,28 @@ public final class DepositService {
     }
 
     public TransferResult deposit(String idempotencyKey, UUID accountId, long amount, String currency) {
-        Boolean isSystem = dsl.select(ACCOUNTS.IS_SYSTEM)
+        String hash = RequestHash.deposit(accountId, amount, currency);
+        // The key's outcome wins over account checks, as it does in the Redis cache path.
+        Optional<TransferResult> replay = transfers.findReplay(idempotencyKey, hash);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
+        Record2<Boolean, String> account = dsl.select(ACCOUNTS.IS_SYSTEM, ACCOUNTS.CURRENCY)
                 .from(ACCOUNTS)
                 .where(ACCOUNTS.ID.eq(accountId))
-                .fetchOne(ACCOUNTS.IS_SYSTEM);
-        if (isSystem == null) {
+                .fetchOne();
+        if (account == null) {
             throw ApiException.notFound("account");
         }
-        if (isSystem) {
+        if (account.value1()) {
             throw ApiException.validation("cannot deposit into a system account");
         }
+        // Fail before a system account is created for a currency nobody holds; the locked check stays authoritative.
+        if (!currency.equals(account.value2().trim())) {
+            throw ApiException.currencyMismatch();
+        }
         UUID systemId = systemAccountId(currency);
-        return transfers.transfer(new TransferCommand(
-                idempotencyKey, RequestHash.deposit(accountId, amount, currency), systemId, accountId, amount, currency));
+        return transfers.transfer(new TransferCommand(idempotencyKey, hash, systemId, accountId, amount, currency, true));
     }
 
     private UUID systemAccountId(String currency) {

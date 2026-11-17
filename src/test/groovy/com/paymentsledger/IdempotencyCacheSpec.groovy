@@ -96,8 +96,12 @@ class IdempotencyCacheSpec extends IntegrationSpec {
         def pool = Executors.newFixedThreadPool(50)
 
         when:
-        def results = (1..50).collect { pool.submit({ post("/transfers", body, key("race")) } as Callable) }*.get()
-        pool.shutdown()
+        def results
+        try {
+            results = (1..50).collect { pool.submit({ post("/transfers", body, key("race")) } as Callable) }*.get()
+        } finally {
+            pool.shutdownNow()
+        }
 
         then:
         results.count { it.status == 201 } == 1

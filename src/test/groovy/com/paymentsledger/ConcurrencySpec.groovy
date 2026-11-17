@@ -81,7 +81,7 @@ class ConcurrencySpec extends IntegrationSpec {
     }
 
     private TransferCommand cmd(String from, String to, long amount, String key = UUID.randomUUID().toString()) {
-        new TransferCommand(key, "h", UUID.fromString(from), UUID.fromString(to), amount, "EUR")
+        new TransferCommand(key, "h", UUID.fromString(from), UUID.fromString(to), amount, "EUR", from == SYSTEM)
     }
 
     private long balance(String id) {

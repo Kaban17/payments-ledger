@@ -205,7 +205,7 @@ POST /transfers                     Idempotency-Key: <client-generated key>
    1. `SELECT … FROM accounts WHERE id IN (:from, :to) ORDER BY id FOR UPDATE`.
       Both rows are always locked in ascending `id` order. When A→B and B→A run at the same time, both transactions try to lock the same row first, so one waits for the other instead of deadlocking.
    2. **Idempotency key re-check, after the lock.** A request with the same key may have committed while this one waited. If so, it is replayed (or rejected with `409` if the hash differs) before any balance check can see the winner's effects.
-   3. Check that both accounts exist (`404`), that the currency matches (`422`), and that a customer source account has enough funds (`422`). System accounts may go negative.
+   3. Check that both accounts exist (`404`), that neither is a system account (`400`; only deposits may use them), that the currency matches (`422`), and that the source account has enough funds (`422`). Deposits are the one case where the source is a system account, which may go negative.
    4. `INSERT` the transfer, then the two ledger entries, then update both balances. If the insert still hits the unique constraint on `idempotency_key`, the transaction rolls back and the existing transfer is returned as a replay.
 4. **After commit,** the response is cached in Redis under the key with a 24h TTL. Error responses are not cached.
 

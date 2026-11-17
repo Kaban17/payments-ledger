@@ -28,7 +28,7 @@ class TransferServiceSpec extends IntegrationSpec {
 
     private TransferCommand cmd(String from, String to, long amount, String key = UUID.randomUUID().toString(),
                                 String hash = "h", String currency = "EUR") {
-        new TransferCommand(key, hash, UUID.fromString(from), UUID.fromString(to), amount, currency)
+        new TransferCommand(key, hash, UUID.fromString(from), UUID.fromString(to), amount, currency, from == SYSTEM)
     }
 
     private long balance(String id) {

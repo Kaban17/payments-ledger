@@ -17,6 +17,7 @@ import io.javalin.Javalin;
 import io.javalin.http.HttpStatus;
 import io.javalin.json.JavalinJackson;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Map;
 import org.jooq.DSLContext;
 import redis.clients.jedis.Jedis;
@@ -42,7 +43,10 @@ public final class App {
         HikariDataSource dataSource = Database.dataSource(config);
         Database.migrate(dataSource);
         DSLContext dsl = Database.dsl(dataSource);
-        JedisPool redis = new JedisPool(new JedisPoolConfig(), URI.create(config.redisUrl()), 500, 500);
+        JedisPoolConfig poolConfig = new JedisPoolConfig();
+        poolConfig.setMaxTotal(32);
+        poolConfig.setMaxWait(Duration.ofMillis(200));
+        JedisPool redis = new JedisPool(poolConfig, URI.create(config.redisUrl()), 500, 500);
 
         ObjectMapper mapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())

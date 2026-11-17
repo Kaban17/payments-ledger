@@ -90,6 +90,9 @@ public final class TransferService {
 
         Record4<UUID, String, Long, Boolean> source = null;
         for (Record4<UUID, String, Long, Boolean> row : locked) {
+            if (row.value4() && !cmd.allowSystemAccounts()) {
+                throw ApiException.validation("system accounts cannot take part in transfers");
+            }
             if (!cmd.currency().equals(row.value2().trim())) {
                 throw ApiException.currencyMismatch();
             }
@@ -130,8 +133,17 @@ public final class TransferService {
         return new TransferResult(transfer, false);
     }
 
+    /** Returns the stored result for the key if one exists; throws 409 if it belongs to a different request. */
+    Optional<TransferResult> findReplay(String idempotencyKey, String requestHash) {
+        return findByKey(idempotencyKey).map(stored -> replay(stored, requestHash));
+    }
+
     private TransferResult replay(StoredTransfer stored, TransferCommand cmd) {
-        if (!stored.requestHash().equals(cmd.requestHash())) {
+        return replay(stored, cmd.requestHash());
+    }
+
+    private TransferResult replay(StoredTransfer stored, String requestHash) {
+        if (!stored.requestHash().equals(requestHash)) {
             throw ApiException.idempotencyKeyReused();
         }
         return new TransferResult(stored.transfer(), true);

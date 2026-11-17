@@ -45,6 +45,12 @@ public final class TransferRoutes {
         UUID to = uuid(body, "toAccountId");
         long amount = amount(body);
         String currency = currency(body);
+        if (amount <= 0) {
+            throw ApiException.validation("amount must be greater than 0");
+        }
+        if (from.equals(to)) {
+            throw ApiException.validation("fromAccountId and toAccountId must differ");
+        }
         String hash = RequestHash.transfer(from, to, amount, currency);
         if (serveFromCache(ctx, key, hash)) {
             return;

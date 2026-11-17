@@ -228,6 +228,78 @@ class TransfersApiSpec extends IntegrationSpec {
         r.body.error == "validation_failed"
     }
 
+    def "transfer #direction a system account returns 400 and writes nothing"() {
+        given:
+        def a = funded(1000)
+        String systemId = app.dsl().fetchValue("SELECT id FROM accounts WHERE is_system").toString()
+        long transfersBefore = app.dsl().fetchValue("SELECT count(*) FROM transfers")
+        long entriesBefore = app.dsl().fetchValue("SELECT count(*) FROM ledger_entries")
+        long systemBalance = app.dsl().fetchValue("SELECT balance FROM accounts WHERE id = ?::uuid", systemId)
+        def (from, to) = fromSystem ? [systemId, a] : [a, systemId]
+
+        when:
+        def r = post("/transfers", [fromAccountId: from, toAccountId: to, amount: 10, currency: "EUR"], key("sys-$direction"))
+
+        then:
+        r.status == 400
+        r.body.error == "validation_failed"
+        app.dsl().fetchValue("SELECT count(*) FROM transfers") == transfersBefore
+        app.dsl().fetchValue("SELECT count(*) FROM ledger_entries") == entriesBefore
+        get("/accounts/$a").body.balance == 1000
+        app.dsl().fetchValue("SELECT balance FROM accounts WHERE id = ?::uuid", systemId) == systemBalance
+
+        where:
+        direction | fromSystem
+        "from"    | true
+        "to"      | false
+    }
+
+    def "a rejected deposit does not create a system account"() {
+        given:
+        def a = newAccount()
+
+        when:
+        def r = post("/deposits", [accountId: a, amount: 10, currency: "XYZ"], key("mismatch"))
+
+        then:
+        r.status == 422
+        r.body.error == "currency_mismatch"
+        app.dsl().fetchValue("SELECT count(*) FROM accounts WHERE is_system AND currency = 'XYZ'") == 0
+    }
+
+    def "a reused key with an invalid amount is 400 even when redis holds the key"() {
+        given:
+        def a = funded(1000)
+        def b = newAccount()
+        assert post("/transfers", [fromAccountId: a, toAccountId: b, amount: 100, currency: "EUR"], key("reuse")).status == 201
+
+        when:
+        def r = post("/transfers", [fromAccountId: a, toAccountId: b, amount: 0, currency: "EUR"], key("reuse"))
+        def same = post("/transfers", [fromAccountId: a, toAccountId: a, amount: 5, currency: "EUR"], key("reuse"))
+
+        then:
+        r.status == 400
+        r.body.error == "validation_failed"
+        same.status == 400
+        same.body.error == "validation_failed"
+    }
+
+    def "a deposit key reused for another account is 409 on the database path"() {
+        given:
+        def a = newAccount()
+        assert post("/deposits", [accountId: a, amount: 100, currency: "EUR"], key("dk")).status == 201
+        redis { it.flushAll() }
+
+        when:
+        def r = post("/deposits", [accountId: UUID.randomUUID().toString(), amount: 100, currency: "EUR"], key("dk"))
+        def replay = post("/deposits", [accountId: a, amount: 100, currency: "EUR"], key("dk"))
+
+        then:
+        r.status == 409
+        r.body.error == "idempotency_key_reused"
+        replay.status == 200
+    }
+
     @Unroll
     def "invalid transfer body #name returns 400 validation_failed"() {
         given:
