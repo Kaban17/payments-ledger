@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.paymentsledger.accounts.AccountRepository;
 import com.paymentsledger.accounts.AccountRoutes;
+import com.paymentsledger.accounts.EntryRepository;
+import com.paymentsledger.accounts.EntryRoutes;
 import com.paymentsledger.api.ErrorHandling;
 import com.paymentsledger.idempotency.IdempotencyCache;
 import com.paymentsledger.transfers.DepositService;
@@ -53,7 +55,9 @@ public final class App {
             cfg.startup.showJavalinBanner = false;
             cfg.jsonMapper(new JavalinJackson(mapper, false));
             ErrorHandling.register(cfg);
-            new AccountRoutes(new AccountRepository(dsl)).register(cfg);
+            AccountRepository accountRepository = new AccountRepository(dsl);
+            new AccountRoutes(accountRepository).register(cfg);
+            new EntryRoutes(accountRepository, new EntryRepository(dsl)).register(cfg);
             new TransferRoutes(transferService, depositService, new IdempotencyCache(redis, mapper), mapper).register(cfg);
 
             cfg.routes.get("/health", ctx -> {
